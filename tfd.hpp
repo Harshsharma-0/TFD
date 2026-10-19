@@ -27,8 +27,8 @@
 #define TDF_HPP
 
 #include <cassert>
-#include <cstring>
 #include <stdint.h>
+#include <cstring>
 
 #define TFD_MIN_BUCKET_SIZE (1 << 2)
 #define TFD_MAX_BUCKET_SIZE 1024
@@ -157,8 +157,8 @@ public:
    */
 
   SOCKET rawsocket(int fd) {
-    uintptr_t fd = raw_base(fd);
-    return fd == TFD_INVALID_RAW_FD ? INVALID_SOCKET_VALUE : fd;
+    uintptr_t _fd = raw_base(fd);
+    return _fd == TFD_INVALID_RAW_FD ? INVALID_SOCKET_VALUE : fd;
   };
 
 /**
@@ -175,16 +175,21 @@ public:
    *
    */
   HANDLE rawhandle(int fd) { 
-    uintptr_t fd = raw_base(fd);
-    return fd == TFD_INVALID_RAW_FD ? INVALID_HANDLE_VALUE : fd;
+    uintptr_t _fd = raw_base(fd);
+    return _fd == TFD_INVALID_RAW_FD ? INVALID_HANDLE_VALUE : fd;
   };
 
 
   int close(int fd) { return close_base(fd); };
-  void enable_reusable() {};
-  void close_all() {};
+  void enable_reusable() { reuse = true; };
 
 private:
+
+  struct tfd_chunk{
+   uintptr_t fd; /// Field to store the raw data of the SOCKET or HANDLE on windows
+   unsigned int next; /// Field to store the next index, if reusability is enabled
+   int type; /// Field to store the type of fd so it can be known while returning the raw_fd or closing the fd
+  };
 
   int init_base(int nbucket, int nfds) {
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
@@ -209,30 +214,35 @@ private:
     };
 
     /* allocating the bucket */
-    uintptr_t **arrfds = new (std::nothrow) uintptr_t *[nbucket];
+    tfd_chunk **arrfds = new (std::nothrow) tfd_chunk* [nbucket];
+
     if (arrfds == nullptr) {
       std::cout << "[tfd error] failed to allocate buckets \n";
       return -1;
     };
-
-    memset(static_cast<void *>(arrfds), '\0', sizeof(uintptr_t) * nbucket);
+  
+//    memset(static_cast<void *>(arrfds),0,sizeof(struct tfd_chunk*) * nbucket);
+    TFD_FILL_ARRAY(arrfds,nullptr,nbucket)
     buckets = nbucket;
 
-    /*allocating the entries for buckets to hold*/
-    uintptr_t *arr = new (std::nothrow) uintptr_t[nfds];
+    /* allocating the entries for buckets to hold */
+    tfd_chunk *arr = new (std::nothrow) tfd_chunk[nfds];
     if (arr == nullptr) {
 
       std::cout << "[tfd error] failed to allocate buckets entries block. \n";
-      delete[] arrfds;
+       delete[] arrfds;
 
       return -1;
     };
+    
+    tfd_chunk chk = {TFD_INVALID_RAW_FD, TFD_INVALID_RAW_FD};
 
-    TFD_FILL_ARRAY(arr,TFD_INVALID_RAW_FD,nfds)
+    TFD_FILL_ARRAY(arr,chk,nfds)
 
     cycle_bit =
         ((sizeof(int) * 8) - 1) -
         __builtin_clz(nfds); // finding the position of the 1 in the bit's
+                             //
     arrfds[0] = arr;
     fds = arrfds;
 
@@ -258,7 +268,7 @@ private:
     if (base > (buckets - 1) || fds[base] == nullptr)
       return TFD_INVALID_RAW_FD;
 
-    uintptr_t raw = fds[base][idx];
+    uintptr_t raw = fds[base][idx].fd;
     return raw;
 
 #else
@@ -282,20 +292,21 @@ private:
 
     if (reuse) {
 
-      if (rfds == ~0U) {
+      if (rfds == TFD_INVALID_RAW_FD) {
         // case when the rfds is empty
         // putting special terminator signature int the reusable chain.
-        fds[base][idx] = static_cast<uintptr_t>(~0U);
+        fds[base][idx].next = TFD_INVALID_RAW_FD;
+        fds[base][idx].fd = TFD_INVALID_RAW_FD;
 
       } else {
         // case when rfds is not empty and needed to be appended;
         // first: save info of the rfds in the fresh fd idx;
-        fds[base][idx] = rfds;
+        fds[base][idx].next = rfds;
+        fds[base][idx].fd = TFD_INVALID_RAW_FD;
       };
-
+  
       // then : passon the fd idx to thr rfds
       rfds = fd;
-      std::cout << fd << " from close : " << fds[base][idx] << std::endl;
     };
 
     return 0; // TODO: add close func and proper method for error detection
@@ -313,14 +324,14 @@ private:
     int idx_bucket = next_idx >> cycle_bit;
     int idx = ~(idx_bucket << cycle_bit) & next_idx;
 
-    if (reuse && rfds != ~0U) {
+    if (reuse && rfds != TFD_INVALID_RAW_FD) {
 
       int idx_base_nxt = rfds >> cycle_bit;
       int idx_base = ~(idx_base_nxt << cycle_bit) & rfds;
       int tmp = rfds;
 
       // contains the info about the next empty slot to be returned;
-      rfds = static_cast<unsigned int>(fds[idx_base_nxt][idx_base]);
+      rfds = fds[idx_base_nxt][idx_base].next;
       return tmp;
     };
 
@@ -337,15 +348,18 @@ private:
       if (buckets == 0)
         return -2;
 
-      uintptr_t *arr = new (std::nothrow) uintptr_t[(1U << cycle_bit)];
+      tfd_chunk *arr = new (std::nothrow) tfd_chunk[(1U << cycle_bit)];
       if (arr == nullptr)
         return -1;
+      
+      tfd_chunk chk = {TFD_INVALID_RAW_FD, TFD_INVALID_RAW_FD};
 
-      TFD_FILL_ARRAY(arr,TFD_INVALID_RAW_FD,(1U << cycle_bit))
+      TFD_FILL_ARRAY(arr,chk,(1U << cycle_bit))
+
       fds[idx_bucket] = arr;
     };
 
-    fds[idx_bucket][idx] = fd;
+    fds[idx_bucket][idx].fd = fd;
 
     return static_cast<int>(next_idx++);
 #else
@@ -354,7 +368,7 @@ private:
   };
 
   /* 2-D array for rfd with rows = nbucket and coloums = rfds */
-  uintptr_t **fds = nullptr;
+  tfd_chunk **fds = nullptr;
 
   /*****************************************
    *
@@ -369,10 +383,10 @@ private:
    *
    *****************************************/
 
-  unsigned int rfds = ~0U; /* chained list of available reusable fd's slots*/
+  unsigned int rfds = TFD_INVALID_RAW_FD; /* chained list of available reusable fd's slots*/
   int buckets = 0;         /* contains the total number of
-                             bucket configuret must be power of 2 */
-  bool reuse = true;       /* flag to enable reusable fd */
+                             bucket configured must be power of 2 */
+  bool reuse = false;       /* flag to enable reusable fd */
 
   unsigned int cycle_bit = 0; /* position of the starting of cycle bit */
   unsigned int next_idx = 0;  /* the next index to return */
