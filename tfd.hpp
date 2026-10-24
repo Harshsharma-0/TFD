@@ -242,21 +242,21 @@ private:
     delete[] fds;
     fds = nullptr;
     rfds = TFD_TYPE_INVALID;
-    cycle_bit = 0;
-    next_idx = 0;
-    buckets = 0;
+    cycle_bit = next_idx = 0;
+    buckets = bucket_count = 0;
     return 0;
 #else
     return 0;
 #endif
   }
   int init_base(int nbucket, int nfds) {
+
+#if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
     // it can be removed by NDEBUG so a if statement to check
     assert(fds == nullptr);
     if (fds != nullptr) /* calling init on already initlised instance */
       return -1;
 
-#if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
     /* checking if nfds is power of 2 or not */
     if ((nfds & (nfds - 1))) {
       std::cout << "nBucket is not power of 2 , or nfds not within limit. \n";
@@ -289,6 +289,7 @@ private:
     //    nbucket);
     TFD_FILL_ARRAY(arrfds, nullptr, nbucket)
     buckets = nbucket;
+    buckets_count += 1;
 
     /* allocating the entries for buckets to hold */
     tfd_chunk *arr = new (std::nothrow) tfd_chunk[nfds];
@@ -324,13 +325,12 @@ private:
 
   uintptr_t raw_base(int fd) const {
 
+#if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
     assert(fds !=
            nullptr); // it can be removed by NDEBUG so a if statement to check
 
     if (fd < 0 || fds == nullptr)
       return TFD_INVALID_RAW_FD;
-
-#if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
 
     int base = fd >> cycle_bit;
     int idx = ~(base << cycle_bit) & fd;
@@ -342,8 +342,11 @@ private:
      * we also check the base exist or not.
      */
 
-    if (base > (buckets - 1) || fds[base] == nullptr)
+    if (base > (buckets - 1))
       return TFD_INVALID_RAW_FD;
+
+    if (fds[base] == nullptr)
+      return TFDTFD_INVALID_RAW_FD;
 
     uintptr_t raw = fds[base][idx].fd;
     return raw;
@@ -357,12 +360,12 @@ private:
 
   int close_base(int fd) {
 
+#if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
+
     assert(fds !=
            nullptr); // it can be removed by NDEBUG so a if statement to check
     if (fd < 0 || fds == nullptr)
       return -1;
-
-#if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
 
     int base = fd >> cycle_bit;
     int idx = ~(base << cycle_bit) & fd;
@@ -418,24 +421,23 @@ private:
       // contains the info about the next empty slot to be returned;
       rfds = fds[idx_base_nxt][idx_base].next;
 
-      fds[idx_base_nxt][idx_base].fd = fd;
-      fds[idx_base_nxt][idx_base].next = TFD_TYPE_INVALID;
-      fds[idx_base_nxt][idx_base].type = type;
+      tfd_chunk &slot = fd[idx_base_nxt][idx_base];
+
+      slot.fd = fd;
+      slot.next = TFD_TYPE_INVALID;
+      slot.type = type;
 
       return tmp;
     };
 
-    // only true if we maxed out in capacity, also check for reusability
+    // only true if we maxed out in capacity,
     if (idx_bucket > (buckets - 1)) {
-      if (!reuse)
-        return -2;
-
       return -2;
     };
 
     // allocating new bucket if previous one exausted
     if (fds[idx_bucket] == nullptr) {
-      if (buckets == 0)
+      if (bucket_count <= buckets)
         return -2;
 
       tfd_chunk *arr = new (std::nothrow) tfd_chunk[(1U << cycle_bit)];
@@ -447,6 +449,7 @@ private:
       TFD_FILL_ARRAY(arr, chk, (1U << cycle_bit))
 
       fds[idx_bucket] = arr;
+      bucket_count += 1;
     };
 
     tfd_chunk &slot = fds[idx_bucket][idx];
@@ -479,9 +482,9 @@ private:
 
   unsigned int rfds =
       TFD_TYPE_INVALID; /* chained list of available reusable fd's slots*/
-  int buckets = 0;      /* contains the total number of
-                          bucket configured must be power of 2 */
-  bool reuse = false;   /* flag to enable reusable fd */
+  int buckets = 0;      /* contains the total number */
+  int bucket_count = 0;
+  bool reuse = false; /* flag to enable reusable fd */
 
   unsigned int cycle_bit = 0; /* position of the starting of cycle bit */
   unsigned int next_idx = 0;  /* the next index to return */
