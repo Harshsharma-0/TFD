@@ -240,13 +240,18 @@ private:
     };
 
     delete[] fds;
-
+    fds = nullptr;
+    rfds = TFD_TYPE_INVALID;
     return 0;
 #else
     return 0;
 #endif
   }
   int init_base(int nbucket, int nfds) {
+    // it can be removed by NDEBUG so a if statement to check
+    assert(fds == nullptr);
+    if (fds != nullptr) /* calling init on already initlised instance */
+      return -1;
 
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
     /* checking if nfds is power of 2 or not */
@@ -316,7 +321,10 @@ private:
 
   uintptr_t raw_base(int fd) const {
 
-    if (fd < 0)
+    assert(fds !=
+           nullptr); // it can be removed by NDEBUG so a if statement to check
+
+    if (fd < 0 || fds == nullptr)
       return TFD_INVALID_RAW_FD;
 
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
@@ -346,7 +354,9 @@ private:
 
   int close_base(int fd) {
 
-    if (fd < 0)
+    assert(fds !=
+           nullptr); // it can be removed by NDEBUG so a if statement to check
+    if (fd < 0 || fds == nullptr)
       return -1;
 
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
@@ -389,7 +399,10 @@ private:
 
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
     // TODO: add relative casts for windows specific SOCKET and HANDLE;
-    assert(fds != nullptr);
+    assert(fds !=
+           nullptr); // it can be removed by NDEBUG so a if statement to check
+    if (fds == nullptr)
+      return -1;
 
     int idx_bucket = next_idx >> cycle_bit;
     int idx = ~(idx_bucket << cycle_bit) & next_idx;
