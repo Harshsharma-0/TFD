@@ -62,6 +62,7 @@ enum TFD_FD_TYPE {
 #elif defined(_WIN32) || defined(_WIN64)
 
 #include <windows.h>
+#include <winsock.h>
 
 #define INVALID_SOCKET_VALUE INVALID_SOCKET
 #define TFD_PLATFORM_WINDOWS
@@ -295,10 +296,16 @@ private:
 
     TFD_FILL_ARRAY(arr, chk, nfds)
 
+#ifdef TFD_PLATFORM_WINDOWS
+    /* TODO : add windows specific code to cound the bits */
+
+#elif defined(TFD_PLATFORM_LINUX)
     cycle_bit =
         ((sizeof(int) * 8) - 1) -
         __builtin_clz(nfds); // finding the position of the 1 in the bit's
-                             //
+#else
+#error unsupported platform error by cycle_bit extraction
+#endif
     arrfds[0] = arr;
     fds = arrfds;
 
@@ -346,18 +353,31 @@ private:
     if (base > (buckets - 1))
       return -1;
 
-    if (reuse) {
-      fds[base][idx].next = rfds;
-      fds[base][idx].fd = TFD_INVALID_RAW_FD;
-    }
+    if (fds[base] == nullptr)
+      return -1;
 
-    rfds = static_cast<unsigned int>(fd);
+    tfd_chunk &slot = fds[base][idx];
+
+    if (slot.type == TFD_TYPE_INVALID)
+      return -1;
+
+    slot.fd = TFD_INVALID_RAW_FD;
+    slot.type = TFD_TYPE_INVALID;
+
+    if (reuse) {
+      slot.next = rfds;
+      rfds = static_cast<unsigned int>(fd);
+    } else {
+      slot.next = TFD_TYPE_INVALID;
+    };
 
     return 0; // TODO: add close func and proper method for error detection
 #else
     return 0;
 #endif
   };
+
+  /* TODO: add bucket allocation tracking */
 
   int open_base(uintptr_t fd, int type) {
 
