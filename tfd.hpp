@@ -62,7 +62,7 @@ enum TFD_FD_TYPE {
 #elif defined(_WIN32) || defined(_WIN64)
 
 #include <windows.h>
-#include <winsock.h>
+#include <winsock2.h>
 
 #define INVALID_SOCKET_VALUE INVALID_SOCKET
 #define TFD_PLATFORM_WINDOWS
@@ -316,6 +316,9 @@ private:
 
   uintptr_t raw_base(int fd) const {
 
+    if (fd < 0)
+      return TFD_INVALID_RAW_FD;
+
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
 
     int base = fd >> cycle_bit;
@@ -342,6 +345,9 @@ private:
   };
 
   int close_base(int fd) {
+
+    if (fd < 0)
+      return -1;
 
 #if defined(TFD_ENABLE_ON_LINUX) || defined(TFD_PLATFORM_WINDOWS)
 
@@ -427,7 +433,10 @@ private:
       fds[idx_bucket] = arr;
     };
 
-    fds[idx_bucket][idx].fd = fd;
+    tfd_chunk &slot = fds[idx_bucket][idx];
+    slot.fd = fd;
+    slot.type = type;
+    slot.next = TFD_TYPE_INVALID;
 
     return static_cast<int>(next_idx++);
 #else
