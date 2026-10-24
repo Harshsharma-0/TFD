@@ -289,7 +289,7 @@ private:
     //    nbucket);
     TFD_FILL_ARRAY(arrfds, nullptr, nbucket)
     buckets = nbucket;
-    buckets_count += 1;
+    bucket_count += 1;
 
     /* allocating the entries for buckets to hold */
     tfd_chunk *arr = new (std::nothrow) tfd_chunk[nfds];
@@ -346,7 +346,7 @@ private:
       return TFD_INVALID_RAW_FD;
 
     if (fds[base] == nullptr)
-      return TFDTFD_INVALID_RAW_FD;
+      return TFD_INVALID_RAW_FD;
 
     uintptr_t raw = fds[base][idx].fd;
     return raw;
@@ -421,7 +421,7 @@ private:
       // contains the info about the next empty slot to be returned;
       rfds = fds[idx_base_nxt][idx_base].next;
 
-      tfd_chunk &slot = fd[idx_base_nxt][idx_base];
+      tfd_chunk &slot = fds[idx_base_nxt][idx_base];
 
       slot.fd = fd;
       slot.next = TFD_TYPE_INVALID;
