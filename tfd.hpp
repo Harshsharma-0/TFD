@@ -242,6 +242,9 @@ private:
     delete[] fds;
     fds = nullptr;
     rfds = TFD_TYPE_INVALID;
+    cycle_bit = 0;
+    next_idx = 0;
+    buckets = 0;
     return 0;
 #else
     return 0;
